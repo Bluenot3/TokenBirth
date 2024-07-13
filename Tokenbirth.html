@@ -1,0 +1,315 @@
+<html><head><base href="https://zenauth.io" />
+    <title>ZENAuth - Secure 3D Authentication Token Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .container {
+            background-color: rgba(30, 30, 60, 0.8);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            z-index: 10;
+            position: relative;
+        }
+        h1 {
+            color: #4da6ff;
+            text-shadow: 0 0 10px rgba(77, 166, 255, 0.5);
+        }
+        #tokenDisplay {
+            font-size: 24px;
+            margin: 20px 0;
+            letter-spacing: 2px;
+            font-family: 'Courier New', Courier, monospace;
+            color: #4da6ff;
+            cursor: pointer;
+        }
+        #coinCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        button {
+            background-color: #4da6ff;
+            border: none;
+            color: #1a1a2e;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        button:hover {
+            background-color: #3d96ff;
+            box-shadow: 0 0 15px rgba(77, 166, 255, 0.5);
+        }
+        #copyNotification {
+            display: none;
+            color: #4da6ff;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ZENAuth Token Generator</h1>
+        <div id="tokenDisplay" onclick="copyToken()"></div>
+        <div id="copyNotification">Token copied to clipboard!</div>
+        <button onclick="generateToken()">Generate New ZENAuth Token</button>
+        <button onclick="saveAsJPEG()">Save as JPEG</button>
+        <button onclick="saveAsPDF()">Save as PDF</button>
+    </div>
+    <canvas id="coinCanvas"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script>
+        const tokenDisplay = document.getElementById('tokenDisplay');
+        let currentToken = '';
+        let scene, camera, renderer, token, textMeshes = [], tokenMaterial, lockHologram;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('coinCanvas'), antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0x4da6ff, 1);
+            pointLight.position.set(5, 5, 5);
+            scene.add(pointLight);
+
+            camera.position.z = 5;
+
+            createToken();
+            createLockHologram();
+            animate();
+        }
+
+        function createToken() {
+            const geometry = new THREE.CylinderGeometry(2, 2, 0.2, 128);
+            tokenMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x4da6ff,
+                metalness: 0.8,
+                roughness: 0.2,
+                reflectivity: 0.9,
+                clearcoat: 1,
+                clearcoatRoughness: 0.1,
+                emissive: 0x1a1a2e,
+                emissiveIntensity: 0.2
+            });
+            token = new THREE.Mesh(geometry, tokenMaterial);
+            scene.add(token);
+
+            const envMap = new THREE.CubeTextureLoader()
+                .setPath('https://threejs.org/examples/textures/cube/SwedishRoyalCastle/')
+                .load(['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg']);
+            scene.environment = envMap;
+            tokenMaterial.envMap = envMap;
+        }
+
+        function createLockHologram() {
+            const lockGeometry = new THREE.PlaneGeometry(1, 1);
+            const lockMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    color: { value: new THREE.Color(0x4da6ff) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float time;
+                    uniform vec3 color;
+                    varying vec2 vUv;
+                    void main() {
+                        vec2 center = vec2(0.5, 0.5);
+                        float dist = distance(vUv, center);
+                        float alpha = smoothstep(0.3, 0.29, dist);
+                        float glow = sin(time * 2.0) * 0.5 + 0.5;
+                        gl_FragColor = vec4(color, alpha * (0.5 + glow * 0.5));
+                    }
+                `,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            lockHologram = new THREE.Mesh(lockGeometry, lockMaterial);
+            lockHologram.position.set(0, 0, 1.1);
+            lockHologram.scale.set(1.5, 1.5, 1.5);
+            token.add(lockHologram);
+        }
+
+        function generateToken() {
+            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let token = '';
+            for (let i = 0; i < 26; i++) {
+                token += characters.charAt(Math.floor(Math.random() * characters.length));
+            }
+            currentToken = token;
+            tokenDisplay.textContent = token;
+            updateTokenText();
+        }
+
+        function updateTokenText() {
+            textMeshes.forEach(mesh => token.remove(mesh));
+            textMeshes = [];
+
+            const loader = new THREE.FontLoader();
+            loader.load('https://threejs.org/examples/fonts/helvetiker_bold.typeface.json', function(font) {
+                const tokenChars = currentToken.split('');
+                
+                tokenChars.forEach((char, index) => {
+                    const textGeometry = new THREE.TextGeometry(char, {
+                        font: font,
+                        size: 0.2,
+                        height: 0.08,
+                        curveSegments: 12,
+                        bevelEnabled: true,
+                        bevelThickness: 0.02,
+                        bevelSize: 0.01,
+                        bevelSegments: 5
+                    });
+                    const textMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e0e0 });
+                    const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+
+                    const angle = (index / tokenChars.length) * Math.PI * 2;
+                    textMesh.position.x = Math.cos(angle) * 1.9;
+                    textMesh.position.y = Math.sin(angle) * 1.9;
+                    textMesh.position.z = 0;
+                    textMesh.rotation.z = -angle + Math.PI / 2;
+                    textMesh.rotation.y = Math.PI / 2;
+
+                    token.add(textMesh);
+                    textMeshes.push(textMesh);
+
+                    textMesh.scale.set(0, 0, 0);
+                    new TWEEN.Tween(textMesh.scale)
+                        .to({x: 1, y: 1, z: 1}, 500)
+                        .delay(index * 50)
+                        .easing(TWEEN.Easing.Back.Out)
+                        .start();
+                });
+
+                const faceTextGeometry = new THREE.TextGeometry(currentToken, {
+                    font: font,
+                    size: 0.15,
+                    height: 0.03,
+                    curveSegments: 12,
+                    bevelEnabled: true,
+                    bevelThickness: 0.01,
+                    bevelSize: 0.005,
+                    bevelSegments: 5
+                });
+                const faceTextMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e0e0 });
+                const faceTextMesh = new THREE.Mesh(faceTextGeometry, faceTextMaterial);
+                faceTextMesh.position.set(-1.5, 0, 0.101);
+                faceTextMesh.rotation.x = -Math.PI / 2;
+                token.add(faceTextMesh);
+                textMeshes.push(faceTextMesh);
+
+                const emblemGeometry = new THREE.TextGeometry("ZA", {
+                    font: font,
+                    size: 0.4,
+                    height: 0.1,
+                    curveSegments: 12,
+                    bevelEnabled: true,
+                    bevelThickness: 0.03,
+                    bevelSize: 0.02,
+                    bevelSegments: 5
+                });
+                const emblemMaterial = new THREE.MeshPhongMaterial({ color: 0xe0e0e0 });
+                const emblemMesh = new THREE.Mesh(emblemGeometry, emblemMaterial);
+                emblemMesh.position.set(-0.4, -0.2, 0.101);
+                emblemMesh.rotation.x = -Math.PI / 2;
+                token.add(emblemMesh);
+                textMeshes.push(emblemMesh);
+
+                emblemMesh.scale.set(0, 0, 0);
+                new TWEEN.Tween(emblemMesh.scale)
+                    .to({x: 1, y: 1, z: 1}, 1000)
+                    .delay(1300)
+                    .easing(TWEEN.Easing.Elastic.Out)
+                    .start();
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            TWEEN.update();
+            token.rotation.y += 0.005;
+            token.rotation.x = Math.sin(Date.now() * 0.001) * 0.1;
+
+            if (lockHologram) {
+                lockHologram.material.uniforms.time.value += 0.016;
+                lockHologram.rotation.y = -token.rotation.y;
+                lockHologram.rotation.x = -token.rotation.x;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function saveAsJPEG() {
+            renderer.render(scene, camera);
+            const dataURL = renderer.domElement.toDataURL('image/jpeg', 1.0);
+            const link = document.createElement('a');
+            link.download = `ZENAuth_${currentToken}.jpg`;
+            link.href = dataURL;
+            link.click();
+        }
+
+        function saveAsPDF() {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF();
+            
+            renderer.render(scene, camera);
+            const imgData = renderer.domElement.toDataURL('image/jpeg', 1.0);
+            
+            pdf.addImage(imgData, 'JPEG', 10, 10, 190, 190);
+            pdf.setFontSize(20);
+            pdf.text(`ZENAuth Token: ${currentToken}`, 10, 210);
+            
+            pdf.save(`ZENAuth_${currentToken}.pdf`);
+        }
+
+        function copyToken() {
+            navigator.clipboard.writeText(currentToken).then(() => {
+                const notification = document.getElementById('copyNotification');
+                notification.style.display = 'block';
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 2000);
+            });
+        }
+
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+        generateToken();
+    </script>
+</body></html>
